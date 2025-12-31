@@ -15,6 +15,7 @@ let socket: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let shouldReconnect = true;
 let attempts = 0;
+let hasShownDisconnect = false;
 
 const cleanup = () => {
   if (reconnectTimer) {
@@ -54,6 +55,7 @@ export const websocketMiddleware: Middleware = (store) => (next) => (action) => 
 
     socket.onopen = () => {
       attempts = 0;
+      hasShownDisconnect = false; // Reset disconnect message flag on successful connection
       store.dispatch(connected(true));
       store.dispatch(reconnecting(false));
     };
@@ -68,6 +70,18 @@ export const websocketMiddleware: Middleware = (store) => (next) => (action) => 
           if (parsed.user_id) {
             store.dispatch(userIdReceived(parsed.user_id));
           }
+
+          // Show "user joined the chat" system message
+          const systemMessage: Message = {
+            type: 'system',
+            username: 'System',
+            user_id: USER_IDS.SYSTEMHELPER,
+            content: `${username} joined the chat`,
+            timestamp: parsed.timestamp || new Date().toISOString(),
+            channel: parsed.channel || 'general',
+            isOwn: false,
+          };
+          store.dispatch(messageReceived(systemMessage));
           return;
         }
 
@@ -112,6 +126,21 @@ export const websocketMiddleware: Middleware = (store) => (next) => (action) => 
 
     socket.onclose = ({ code }) => {
       store.dispatch(connected(false));
+
+      // Show disconnection message only once
+      if (!hasShownDisconnect) {
+        hasShownDisconnect = true;
+        const disconnectMessage: Message = {
+          type: 'system',
+          username: 'System',
+          user_id: USER_IDS.SYSTEMHELPER,
+          content: code === 1000 ? `${username} left the chat` : `${username} disconnected`,
+          timestamp: new Date().toISOString(),
+          channel: 'general',
+          isOwn: false,
+        };
+        store.dispatch(messageReceived(disconnectMessage));
+      }
 
       if (shouldReconnect && code !== 1000 && attempts < WEBSOCKET.MAX_ATTEMPTS) {
         attempts++;
